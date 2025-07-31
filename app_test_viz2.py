@@ -14,20 +14,19 @@ gdf_merged = gdf_boundaries.merge(df_2024, left_on='katotth', right_on='Код_�
 top_10 = gdf_merged.nlargest(10, 'Всього_туристо_діб').copy()
 
 # виправлена назва поля
-top_10['short_name'] = top_10['name_uk'].str.replace(
-    ' територіальна громада| селищна громада| сільська громада| міська громада', ' ТГ', regex=True)
+top_10['short_name'] = top_10['Назва ТГ']
 
 # будуємо карту
 fig, ax = plt.subplots(figsize=(12, 12))
-gdf_merged.plot(column='Всього_туристо_діб', cmap='OrRd', linewidth=0.3, edgecolor='black', legend=True, ax=ax)
+gdf_merged.plot(column='Погашено боргу, тис.грн.', cmap='OrRd', linewidth=0.3, edgecolor='black', legend=True, ax=ax)
 
-ax.set_title("Кількість туристо-діб за громадами (2024)", fontsize=16)
+ax.set_title("Погашено податкового боргу до бюджету ТГ з початку 2025 року", fontsize=16)
 ax.axis('off')
 
 # додаємо анотації для ТОП-10 громад
 for idx, row in top_10.iterrows():
     plt.annotate(
-        text=f"{row['short_name']}\n{row['Всього_туристо_діб']/1000:.1f} тис.",
+        text=f"{row['short_name']}\n{row['Всього_туристо_дібПогашено боргу, тис.грн.']/1000:.1f} млн.",
         xy=(row.geometry.centroid.x, row.geometry.centroid.y),
         xytext=(3, 3),
         textcoords="offset points",
@@ -40,9 +39,9 @@ for idx, row in top_10.iterrows():
 import pandas as pd
 from matplotlib.table import Table
 
-table_data = top_10[['short_name', 'Всього_туристо_діб']].copy()
-table_data['Всього_туристо_діб'] = (table_data['Всього_туристо_діб']/1000).round(1).astype(str) + ' тис.'
-table_data.columns = ['Громада', 'Туристо-доби']
+table_data = top_10[['short_name', 'Погашено боргу, тис.грн.']].copy()
+table_data['Погашено боргу, тис.грн.'] = (table_data['Погашено боргу, тис.грн.']/1000).round(1).astype(str) + ' млн.'
+table_data.columns = ['ТГ', 'Погашено боргу, тис.грн.']
 
 # позиція таблиці
 table_ax = fig.add_axes([0.05, 0.05, 0.25, 0.3])
@@ -52,7 +51,7 @@ tbl.auto_set_font_size(False)
 tbl.set_fontsize(9)
 tbl.auto_set_column_width(col=list(range(len(table_data.columns))))
 # компактний підпис над таблицею
-table_ax.set_title("ТОП-10 територіальних громад\nза кількістю прийнятих туристів", fontsize=12, fontweight='bold')
+table_ax.set_title("ТОП-10 територіальних громад\nза сумою погашеного боргу", fontsize=12, fontweight='bold')
 
 plt.show()
 
