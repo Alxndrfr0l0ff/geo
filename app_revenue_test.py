@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from esda.getisord import G_Local
 from libpysal.weights import Queen
 from esda.moran import Moran_BV
+import seaborn as sns
+
 
 df_atm = pd.read_excel('revenue_pol_tax_atm.xlsx')
 df_wtr = pd.read_excel('revenue_pol_tax_wtr.xlsx')
@@ -89,3 +91,13 @@ moran_bv2 = Moran_BV(y1, y4, w)
 print(f"Bivariate Moran's I: {moran_bv.I}, p-value: {moran_bv.p_sim}")
 print(f"Bivariate Moran's I: {moran_bv1.I}, p-value: {moran_bv1.p_sim}")
 print(f"Bivariate Moran's I: {moran_bv2.I}, p-value: {moran_bv2.p_sim}")
+
+
+pivot = gdf_merged.set_index('name_uk')[['Податок_атмосфера', 'Податок_вода', 'Податок_ТПВ','Туристичний_збір']].fillna(0)
+plt.figure(figsize=(8,12))
+sns.heatmap(pivot, annot=True, fmt='.0f', cmap='YlGnBu')
+plt.title('Порівняння надходжень екоподатку по громадах')
+plt.xlabel('Тип податку')
+plt.ylabel('Громада')
+plt.tight_layout()
+plt.show()
