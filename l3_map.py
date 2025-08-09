@@ -1,145 +1,102 @@
-# l3_map.py
+# map_with_topbars_gpd.py
 # -*- coding: utf-8 -*-
-"""
-Карта розподілу туристичних підприємств по тергромадах (L3, пропорційна)
-+ горизонтальна бар‑діаграма ТОП‑10 громад праворуч.
-Працює через pyshp (shapefile), без geopandas.
-
-Приклад запуску:
-  python l3_map.py --excel kved_dist.xlsx --shp IF_reg_TG_bou_7.shp \
-    --code-field katotth --name-field name_uk \
-    --cmap YlGnBu --scale log --figw 18 --figh 9 --out l3_map.png
-"""
-
 import argparse
 import pandas as pd
-import shapefile  # pyshp
+import geopandas as gpd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import PatchCollection
-from matplotlib.patches import Polygon as MplPolygon
-from matplotlib.colors import LogNorm, Normalize
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.colors import Normalize, LogNorm
+from matplotlib.ticker import FuncFormatter
+import matplotlib as mpl
 
+def kfmt(x, _):
+    # формат тисяч без десяткових
+    return f"{int(x):,}".replace(",", " ")
 
-def build_map(
-    excel_path: str,
-    sheet: str | None,
-    shp_path: str,
-    code_field: str,
-    name_field: str,
-    cmap_name: str,
-    scale: str,
-    figw: float,
-    figh: float,
-    out_path: str,
-):
-    # --- 1) Дані з Excel ---
-    df = pd.read_excel(
-        excel_path,
-        sheet_name=None if sheet in (None, "None", "") else sheet
-    )
-    if isinstance(df, dict):
-        df = df[next(iter(df))]  # перший лист, якщо sheet не задано
+def main(excel, sheet, shp, code_field, name_field,
+         cmap, scale, figw, figh, out_png):
+
+    # ------- дані -------
+    df = pd.read_excel(excel, sheet_name=None if sheet in (None, "None", "") else sheet)
+    if isinstance(df, dict): df = df[next(iter(df))]
     if "L3" not in df.columns:
-        raise SystemExit("У файлі Excel немає колонки 'L3'.")
-    l3_counts = df["L3"].value_counts()
-    l3_counts_dict = l3_counts.to_dict()
+        raise SystemExit("У Excel немає колонки 'L3' (коди тергромад).")
 
-    # --- 2) Шейпфайл ---
-    sf = shapefile.Reader(shp_path)
-    fields = [f[0] for f in sf.fields[1:]]  # без DeletionFlag
-    if code_field not in fields:
-        raise SystemExit(f"Поле '{code_field}' не знайдено у шейпі. Доступні: {fields}")
-    if name_field not in fields:
-        raise SystemExit(f"Поле '{name_field}' не знайдено у шейпі. Доступні: {fields}")
+    counts = df["L3"].value_counts().rename("count").to_frame()
 
-    code_idx = fields.index(code_field)
-    name_idx = fields.index(name_field)
+    gdf = gpd.read_file(shp)
+    if code_field not in gdf.columns: raise SystemExit(f"Немає поля '{code_field}' у шейпі.")
+    if name_field not in gdf.columns: raise SystemExit(f"Немає поля '{name_field}' у шейпі.")
 
-    patches, values = [], []
-    per_comm = {}  # сума по кожній громаді (назва -> кількість)
-    for sr in sf.shapeRecords():
-        rec = sr.record
-        code = rec[code_idx]
-        name = rec[name_idx] or str(code)
-        count = int(l3_counts_dict.get(code, 0))
-        per_comm[name] = int(per_comm.get(name, 0) + count)
+    gdf = gdf.merge(counts, left_on=code_field, right_index=True, how="left")
+    gdf["count"] = gdf["count"].fillna(0).astype(int)
 
-        shp = sr.shape
-        parts = list(shp.parts) + [len(shp.points)]
-        for i in range(len(parts) - 1):
-            pts = shp.points[parts[i]:parts[i + 1]]
-            patches.append(MplPolygon(pts, closed=True))
-            values.append(count)
+    top = (gdf.groupby(name_field)["count"].sum()
+           .sort_values(ascending=False).head(10))
+    top_names = list(top.index[::-1])
+    top_vals  = list(top.values[::-1])
 
-    values = np.array(values, dtype=float)
-
-    # --- 3) Фігура з фіксованими областями осей (жорсткий лейаут) ---
-    fig = plt.figure(figsize=(figw, figh))
-    # [left, bottom, width, height] у частках від фігури
-    ax_map = fig.add_axes([0.05, 0.10, 0.52, 0.82])   # карта ліворуч (52% ширини)
-    ax_bar = fig.add_axes([0.62, 0.12, 0.33, 0.78])   # бар‑чарт праворуч, гарантований зазор
-
-    # --- 4) Карта (пропорційна) ---
-    if scale.lower() == "log":
-        norm = LogNorm(vmin=max(values[values > 0].min(), 1), vmax=values.max())
+    vals = gdf["count"].to_numpy()
+    if scale == "log":
+        vmin = max(1, int(vals[vals > 0].min()) if (vals > 0).any() else 1)
+        norm = LogNorm(vmin=vmin, vmax=max(vals.max(), vmin))
     else:
-        norm = Normalize(vmin=values.min(), vmax=values.max())
+        norm = Normalize(vmin=vals.min(), vmax=vals.max())
 
-    coll = PatchCollection(
-        patches, cmap=cmap_name, norm=norm, edgecolor="black", linewidths=0.35
-    )
-    coll.set_array(values)
-    ax_map.add_collection(coll)
-    ax_map.autoscale_view()
-    ax_map.set_aspect("equal", adjustable="datalim")  # збереження пропорцій
-    ax_map.margins(0.02)
-    ax_map.axis("off")
-    ax_map.set_title("Розподіл туристичних підприємств по тергромадах", pad=8)
+    # ------- фігура/осі (жорстка розкладка без перекриттів) -------
+    fig = plt.figure(figsize=(12, 12))
+    # карта: ліва, 60% ширини, великі поля зверху/знизу
+    ax_map   = fig.add_axes([0.06, 0.16, 0.58, 0.78])
+    # бар‑чарт: права панель, гарантований зазор
+    ax_bar   = fig.add_axes([0.68, 0.18, 0.28, 0.72])
+    # колорбар під картою, по центру
+    cax      = fig.add_axes([0.22, 0.08, 0.26, 0.035])
 
-    # Компактний колорбар як inset всередині карти
-    cax = inset_axes(ax_map, width="55%", height="4%", loc="lower left", borderpad=1.0)
-    cb = plt.colorbar(coll, cax=cax, orientation="horizontal")
-    cb.set_label("Кількість підприємств", fontsize=9)
-    cb.ax.tick_params(labelsize=8)
+    # ------- карта -------
+    gdf.plot(column="count", cmap=cmap, norm=norm,
+             linewidth=0.35, edgecolor="#2f2f2f", ax=ax_map)
+    ax_map.set_aspect('equal')
+    ax_map.set_axis_off()
+    ax_map.set_title("Розподіл туристичних підприємств по тергромадах",
+                     fontsize=14, pad=8)
 
-    # --- 5) ТОП‑10 бар‑діаграма (повні назви) ---
-    top_items = sorted(per_comm.items(), key=lambda x: x[1], reverse=True)[:10]
-    names = [nm for nm, _ in top_items][::-1]
-    vals = [cnt for _, cnt in top_items][::-1]
+    sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
+    cb = plt.colorbar(sm, cax=cax, orientation="horizontal")
+    cb.set_label("Кількість підприємств", fontsize=10)
+    cb.ax.tick_params(labelsize=9)
 
-    ax_bar.barh(range(len(vals)), vals)
-    ax_bar.set_yticks(range(len(vals)), labels=names, fontsize=11)
+    # ------- бар‑діаграма -------
+    ax_bar.barh(range(len(top_vals)), top_vals, height=0.75)
+    ax_bar.set_yticks(range(len(top_vals)), labels=top_names, fontsize=10)
     ax_bar.set_xlabel("К-сть", fontsize=11)
+    ax_bar.xaxis.set_major_formatter(FuncFormatter(kfmt))
     ax_bar.grid(axis="x", linestyle="--", alpha=0.35)
-    ax_bar.set_xlim(0, max(vals) * 1.15)  # запас для чисел праворуч
-    for i, v in enumerate(vals):
-        ax_bar.text(v, i, f" {v}", va="center", fontsize=11)
-    ax_bar.set_title("ТОП‑10 громад за кількістю зареєстрованих туристичних підприємств", pad=8)
+    # запас справа під числа
+    ax_bar.set_xlim(0, max(top_vals) * 1.18)
+    for i, v in enumerate(top_vals):
+        ax_bar.text(v, i, f" {kfmt(v,None)}", va="center", fontsize=10)
+    # підчистити рамку
+    for spine in ["top","right","left"]:
+        ax_bar.spines[spine].set_visible(False)
+    ax_bar.tick_params(axis='y', length=0)
+    ax_bar.set_title("ТОП‑10 громад", fontsize=13, pad=6)
 
-    # ВАЖЛИВО: не використовуємо bbox_inches='tight', щоб не зрушувало осі
-    plt.savefig(out_path, dpi=240, facecolor="white")
-    print(f"Збережено: {out_path}")
-
+    # важливо: без bbox_inches='tight'
+    plt.savefig(out_png, dpi=240, facecolor="white")
+    print(f"Збережено: {out_png}")
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--excel", required=True, help="Шлях до kved_dist.xlsx")
-    p.add_argument("--sheet", default=None, help="Назва листа Excel (або залиште None)")
-    p.add_argument("--shp", required=True, help="Шлях до IF_reg_TG_bou_7.shp")
-    p.add_argument("--code-field", default="katotth", help="Поле коду громади у шейпі")
-    p.add_argument("--name-field", default="name_uk", help="Поле назви громади у шейпі")
-    p.add_argument("--cmap", default="YlGnBu", help="Colormap (YlGnBu, OrRd, viridis тощо)")
-    p.add_argument("--scale", default="linear", choices=["linear", "log"], help="Масштаб кольору")
-    p.add_argument("--figw", type=float, default=18.0, help="Ширина фігури (дюйми)")
-    p.add_argument("--figh", type=float, default=9.0, help="Висота фігури (дюйми)")
-    p.add_argument("--out", default="l3_map.png", help="Вихідний PNG")
-    args = p.parse_args()
-
-    build_map(
-        args.excel, args.sheet, args.shp,
-        args.code_field, args.name_field, args.cmap,
-        args.scale, args.figw, args.figh, args.out
-    )
-plt.show()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--excel", required=True, help="kved_dist.xlsx (має колонку L3)")
+    ap.add_argument("--sheet", default=None, help="Назва листа або None")
+    ap.add_argument("--shp", required=True, help="IF_reg_TG_bou_7.shp")
+    ap.add_argument("--code-field", default="katotth")
+    ap.add_argument("--name-field", default="name_uk")
+    ap.add_argument("--cmap", default="YlGnBu")  # OrRd, viridis, cividis
+    ap.add_argument("--scale", choices=["linear","log"], default="linear")
+    ap.add_argument("--figw", type=float, default=18.0)
+    ap.add_argument("--figh", type=float, default=9.5)
+    ap.add_argument("--out", default="l3_map.png")
+    args = ap.parse_args()
+    main(args.excel, args.sheet, args.shp, args.code_field, args.name_field,
+         args.cmap, args.scale, args.figw, args.figh, args.out)
