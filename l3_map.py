@@ -57,7 +57,7 @@ def main(excel, sheet, shp, code_field, name_field,
              linewidth=0.35, edgecolor="#2f2f2f", ax=ax_map)
     ax_map.set_aspect('equal')
     ax_map.set_axis_off()
-    ax_map.set_title("Розподіл туристичних підприємств по тергромадах",
+    ax_map.set_title("Розподіл туристичних підприємств (суміжні види діяльності) по тергромадах",
                      fontsize=14, pad=8)
 
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
