@@ -12,6 +12,7 @@ select KOD from etalon.e_kved where d_end>sysdate and kod in (
 '_79.12',
 '_79.90')) AND D_CLOSE IS NULL AND id_KATOTTG IS NOT NULL and d_reg_sa<trunc(sysdate,'YY') AND FACE_MODE=1 ;
 
+select kved,etalon.kved_name(1,kved) kvedn, count(distinct tin) cnt from (
 SELECT A.*, (SELECT DISTINCT LEVEL_3 FROM ETALON.E_KATOTTG B WHERE D_END>SYSDATE AND A.ID_KATOTTG=B.C_KATOTTG) L3 FROM STSU.R21TAXPAY_U A WHERE KVED IN (
 select KOD from etalon.e_kved where d_end>sysdate and kod in
 ('_47.19', '_47.78',
@@ -27,4 +28,4 @@ select KOD from etalon.e_kved where d_end>sysdate and kod in
 '_68.10', '_68.32',
 '_63.11', '_63.12',
 '_80.10', '_80.20',
-'_82.30')) AND D_CLOSE IS NULL AND id_KATOTTG IS NOT NULL and d_reg_sa<trunc(sysdate,'YY') --AND FACE_MODE=1;
+'_82.30')) AND D_CLOSE IS NULL AND id_KATOTTG IS NOT NULL and d_reg_sa<trunc(sysdate,'YY') /*AND FACE_MODE=1*/) group by kved;
