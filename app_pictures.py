@@ -39,7 +39,7 @@ ax2.plot([27,27],[52,55], linewidth=4)           # plume stub
 ax2.plot([70,70],[20,33.5], linewidth=2)         # pole
 ax2.plot(70,33.5, marker="o", markersize=6)      # sensor
 ax2.annotate("", xy=(67,22), xytext=(27,22), arrowprops=dict(arrowstyle="<->"))
-ax2.text(40,18,"≥ 25–30 м від джерела", ha="center")
+ax2.text(40,17,"≥ 25–30 м від джерела", ha="center")
 ax2.annotate("Переважний вітер", xy=(40,50), xytext=(70,50), arrowprops=dict(arrowstyle="->"))
 ax2.text(5,56,"Ескіз 2. Віддаленість від локальних джерел (котельня/вентвикид)", fontsize=10)
 ax2.axis("off")
