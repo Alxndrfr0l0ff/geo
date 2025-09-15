@@ -4,8 +4,10 @@ import pandas as pd
 import geopandas as gpd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.colors import ListedColormap, BoundaryNorm, Normalize
 from matplotlib.ticker import FuncFormatter, MaxNLocator
+
+
 
 # ====================== КОНФІГ ШЛЯХІВ ======================
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -111,52 +113,53 @@ g["area_km2"] = g.geometry.area / 1e6
 g["intensity_t_km2"] = np.where(g["area_km2"]>0, g["em_total_tg"]/g["area_km2"], np.nan)
 
 # ================== 6) ДВІ ПАНЕЛІ (СТИЛЬ МАКЕТУ) =============
+# ---- ПАНЕЛІ У СТИЛІ "YlGnBu / YlOrBr", ЧОРНІ МЕЖІ, ПЕРЦЕНТИЛІ ----
+def _auto_limits(vals, lo_pct=1, hi_pct=99, fallback=(0.0, 1.0)):
+    arr = np.asarray(vals, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return fallback
+    vmin = float(np.nanpercentile(arr, lo_pct))
+    vmax = float(np.nanpercentile(arr, hi_pct))
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+        return fallback
+    return vmin, vmax
+
 fig, axes = plt.subplots(1, 2, figsize=(11.2, 6.6), dpi=300, constrained_layout=True)
 
-# --- Ліва: інтенсивність (т/км²), дискретні квантильні пороги (6 класів) ---
-valsL = g["intensity_t_km2"].to_numpy()
-valsL = valsL[np.isfinite(valsL)]
-if len(valsL) >= 6 and np.nanmax(valsL) > 0:
-    bins_L = np.unique(np.quantile(valsL, [0, .2, .4, .6, .8, 1.0]))
-    # гарантуємо 6 інтервалів (7 порогів)
-    if bins_L.size < 7:
-        vmax = float(np.nanmax(valsL)); bins_L = np.linspace(0, vmax, 7)
-else:
-    bins_L = np.linspace(0, 1, 7)
-normL = BoundaryNorm(bins_L, BLUES_6.N, clip=True)
-
-g.plot(ax=axes[0], column="intensity_t_km2", cmap=BLUES_6, norm=normL,
-       edgecolor="#ffffff", linewidth=0.6, antialiased=True)
-axes[0].set_title("Викиди в атмосферу (усі підприємства) на км²\nРік: 2024", fontsize=10)
+# ЛІВА: інтенсивність (т/км²) — YlGnBu, авто vmin/vmax за 1–99 перцентилями
+vmin_L, vmax_L = _auto_limits(g["intensity_t_km2"], 1, 99, (0.0, 1.0))
+normL = Normalize(vmin=vmin_L, vmax=vmax_L)
+g.plot(ax=axes[0], column="intensity_t_km2",
+       cmap="YlGnBu", norm=normL,
+       edgecolor="black", linewidth=0.35, antialiased=True)
+axes[0].set_title("Викиди в атмосферу (всі підприємства) на км²\nРік: 2024", fontsize=10)
 axes[0].axis("off")
-cbarL = plt.cm.ScalarMappable(norm=normL, cmap=BLUES_6)
-cbL = fig.colorbar(cbarL, ax=axes[0], fraction=0.035, pad=0.01)
-cbL.ax.set_ylabel("т/км²", rotation=90, fontsize=8)
-cbL.ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
-cbL.ax.yaxis.set_major_formatter(fmt_plain)
+cbarL = fig.colorbar(plt.cm.ScalarMappable(norm=normL, cmap="YlGnBu"),
+                     ax=axes[0], fraction=0.03, pad=0.02)
+cbarL.set_label("умовні од./км²", fontsize=9)
 
-# --- Права: частка турпідприємств (0..1), фіксовані пороги (6 класів) ---
-bins_R = np.array([0.0, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0])
-normR  = BoundaryNorm(bins_R, ORANGES_6.N, clip=True)
-
-g.plot(ax=axes[1], column="tour_share", cmap=ORANGES_6, norm=normR,
-       edgecolor="#ffffff", linewidth=0.6, antialiased=True)
+# ПРАВА: частка турпідприємств (0–1) — YlOrBr, фіксований діапазон
+normR = Normalize(vmin=0.0, vmax=1.0)
+g.plot(ax=axes[1], column="tour_share",
+       cmap="YlOrBr", norm=normR,
+       edgecolor="black", linewidth=0.35, antialiased=True)
 axes[1].set_title("Частка туристичних підприємств у викидах в атмосферу\nРік: 2024", fontsize=10)
 axes[1].axis("off")
-cbarR = plt.cm.ScalarMappable(norm=normR, cmap=ORANGES_6)
-cbR = fig.colorbar(cbarR, ax=axes[1], fraction=0.035, pad=0.01)
-cbR.ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
-cbR.ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{x:.1f}"))
+cbarR = fig.colorbar(plt.cm.ScalarMappable(norm=normR, cmap="YlOrBr"),
+                     ax=axes[1], fraction=0.03, pad=0.02)
+cbarR.set_label("частка (0–1)", fontsize=9)
 
-# --- Збереження (PNG + опційно SVG для верстки) ---
 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-out_png = os.path.join(OUTPUT_DIR, f"fig_3_9_style_MATCH_{ts}.png")
+out_png = os.path.join(OUTPUT_DIR, f"fig_3_9_legacy_style_{ts}.png")
 plt.savefig(out_png, dpi=300, facecolor="white", bbox_inches="tight")
-# також можна розкоментувати SVG:
-# out_svg = os.path.join(OUTPUT_DIR, f"fig_3_9_style_MATCH_{ts}.svg")
-# plt.savefig(out_svg, facecolor="white", bbox_inches="tight")
-print("[OK] Saved:", out_png)
+print("[OK] Saved (legacy style):", out_png)
+
 
 # контрольна таблиця показників:
 g.drop(columns="geometry")[["katotth","em_total_tg","em_tour_tg","tour_share","area_km2","intensity_t_km2"]] \
  .to_csv(os.path.join(OUTPUT_DIR, f"fig_3_9_metrics_{ts}.csv"), index=False)
+cols = ["katotth", "name_uk", "em_total_tg", "em_tour_tg", "tour_share", "area_km2", "intensity_t_km2"]
+(g[cols].drop(columns="geometry", errors="ignore")
+   if "geometry" in g.columns else g[cols]) \
+  .to_csv(os.path.join(OUTPUT_DIR, f"fig_3_9_metrics_with_names_{ts}.csv"), index=False)
