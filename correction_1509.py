@@ -83,29 +83,23 @@ else:
     tour_24 = total_24.copy()
     tour_24["em_tour_t"] = 0.0
 
-# 4) ШЕЙПФАЙЛ: атрибути + геодезична площа як ФОЛБЕК ---------------------
-# 4) ШЕЙПФАЙЛ: атрибути + заготовки для площі/екстенту -------------------
+# 4) ШЕЙПФАЙЛ: атрибути + геометрія + fallback-площа ---------------------
 sf = shapefile.Reader(str(SHAPE_PATH))
 
-# атрибути (records)
+# атрибути (records): очікуємо 'katotth' і 'name_uk'
 fields = [f[0] for f in sf.fields if f[0] != "DeletionFlag"]
 recs = [{fields[i]: r[i] for i in range(len(fields))} for r in sf.records()]
-attr = pd.DataFrame(recs)  # очікуємо 'katotth', 'name_uk'
-
+attr = pd.DataFrame(recs)
 if "katotth" not in attr.columns or "name_uk" not in attr.columns:
     raise ValueError("У шейпі мають бути атрибути 'katotth' і 'name_uk'")
 
-# геометрія → patches (для карти) + xs_all/ys_all для меж; fallback-площі = NaN
+# полігони для карти + межі карти + заготовка площі (NaN)
 shapes = sf.shapes()
 patches = []
 xs_all, ys_all = [], []
-areas_km2_fallback = []
-
 for shp in shapes:
     pts_all = shp.points
     parts = list(shp.parts) + [len(pts_all)]
-
-    # Збираємо зовнішній контур для відмальовки
     if len(parts) >= 2:
         exterior = pts_all[parts[0]:parts[1]]
         if len(exterior) >= 3:
@@ -113,12 +107,8 @@ for shp in shapes:
             xs_all.extend([p[0] for p in exterior])
             ys_all.extend([p[1] for p in exterior])
 
-    # Fallback-площа (тут не обчислюємо, ставимо NaN — пріоритет Вікі-площам)
-    areas_km2_fallback.append(np.nan)
-
-# додаємо колонку, щоб нижче merge не падав
-attr["area_km2_fallback"] = areas_km2_fallback
-
+# fallback-площа: залишаємо NaN (реально беремо з «вікі»-списку)
+attr["area_km2_fallback"] = np.nan
 
 # 5) ПЛОЩІ З ВАШОГО «ВІКІ»-СПИСКУ (ПРІОРИТЕТ) ----------------------------
 raw_text = """Білоберізька сільська громада 370,9
@@ -194,36 +184,48 @@ for line in [l.strip() for l in raw_text.strip().splitlines() if l.strip()]:
 areas_wiki = pd.DataFrame(pairs, columns=["name_uk", "area_km2_wiki"])
 
 # 6) ЗЛИТТЯ: назви/коди/площі + викиди + тур-частка ----------------------
-df = (attr[["katotth","name_uk","area_km2_fallback"]]
-      .merge(total_24, left_on="katotth", right_on="HKATOTTG", how="left")
-      .merge(tour_24 , on="HKATOTTG", how="left")
-      .merge(areas_wiki, on="name_uk", how="left"))
+# беремо коди/назви/NaN-площу із шейпа
+df = attr[["katotth", "name_uk", "area_km2_fallback"]].copy()
 
+# додаємо «вікі»-площі (мають пріоритет)
+df = df.merge(areas_wiki, on="name_uk", how="left")
+
+# додаємо викиди (всього) і туристичні
+df = (df.merge(total_24, left_on="katotth", right_on="HKATOTTG", how="left")
+        .merge(tour_24,  on="HKATOTTG", how="left"))
+
+# колонка з правої таблиці нам більше не потрібна, залишаємо тільки katotth
+df.drop(columns=["HKATOTTG"], inplace=True, errors="ignore")
+
+# числові та розрахункові поля
 df["em_total_t"] = pd.to_numeric(df["em_total_t"], errors="coerce").fillna(0.0)
-df["em_tour_t"]  = pd.to_numeric(df["em_tour_t"], errors="coerce").fillna(0.0)
-
-# Пріоритет площі: wiki → fallback
-df["area_km2"] = np.where(df["area_km2_wiki"].notna(), df["area_km2_wiki"], df["area_km2_fallback"])
+df["em_tour_t"]  = pd.to_numeric(df["em_tour_t"],  errors="coerce").fillna(0.0)
+df["area_km2"]   = np.where(df["area_km2_wiki"].notna(),
+                            df["area_km2_wiki"], df["area_km2_fallback"])
 
 eps = 1e-12
 df["intensity_t_km2"] = df["em_total_t"] / (df["area_km2"] + eps)
-df["tour_share"]      = np.where(df["em_total_t"] > 0, df["em_tour_t"] / df["em_total_t"], np.nan)
+df["tour_share"]      = np.where(df["em_total_t"] > 0,
+                                 df["em_tour_t"] / df["em_total_t"], np.nan)
 
-# Контрольна сума по області
-region_total = df["em_total_t"].sum()
-print(f"[INFO] Сума по області (тонн): {region_total:,.2f}")
+# контрольна сума (має збігатися з «всього по області» за 2024)
+print(f"[INFO] Сума по області (тонн): {df['em_total_t'].sum():,.2f}")
 
-# 7) ПІДГОТОВКА К МАЛЮВАННЮ (масив значень уздовж черги шейпа) ----------
-# Порядок записів у атрибутах відповідає порядку shapes(), тому беремо katotth з attr
+
+# 7) ПІДГОТОВКА ДО МАЛЮВАННЯ --------------------------------------------
+# Порядок shapes() == порядок записів у attr, тому беремо kat-список прямо з attr
 kat_list = attr["katotth"].tolist()
-map_by_kat = {row["katotth"]: row for _, row in df.set_index("katotth").iterrows()}
 
-def grid_values(key):
-    # повертає np.array значень у порядку полігонів шейпа
+# індекс за katotth, але сам стовпець залишимо в таблиці
+df_idx = df.set_index("katotth", drop=False)
+
+def grid_values(colname: str) -> np.ndarray:
     vals = []
     for k in kat_list:
-        row = map_by_kat.get(k)
-        vals.append(np.nan if row is None else row.get(key, np.nan))
+        if k in df_idx.index and colname in df_idx.columns:
+            vals.append(df_idx.at[k, colname])
+        else:
+            vals.append(np.nan)
     return np.array(vals, dtype=float)
 
 # 8) СТИЛЬНІ ФУНКЦІЇ ДЛЯ КАРТ -------------------------------------------
@@ -232,6 +234,7 @@ miny, maxy = min(ys_all), max(ys_all)
 pad_x = (maxx - minx) * 0.03
 pad_y = (maxy - miny) * 0.03
 minx -= pad_x; maxx += pad_x; miny -= pad_y; maxy += pad_y
+
 
 def _auto_limits(vals, lo_pct=1, hi_pct=99, fallback=(0.0, 1.0)):
     arr = np.asarray(vals, dtype=float)
